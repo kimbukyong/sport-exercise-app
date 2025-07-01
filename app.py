@@ -6,103 +6,97 @@ import os
 import hashlib
 import secrets
 import urllib.parse
+import time
 
 app = Flask(__name__)
 CORS(app)  # CORS 허용
 
-# 데이터베이스 설정
-DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///exercise_data.db')
-USE_POSTGRESQL = DATABASE_URL.startswith('postgres')
-
-if USE_POSTGRESQL:
-    import psycopg2
-    import psycopg2.extras
-    
-    def get_db_connection():
-        try:
-            # Heroku/Railway PostgreSQL URL 파싱
-            if DATABASE_URL.startswith('postgres://'):
-                DATABASE_URL_FIXED = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
-            else:
-                DATABASE_URL_FIXED = DATABASE_URL
-                
-            conn = psycopg2.connect(DATABASE_URL_FIXED)
-            return conn
-        except Exception as e:
-            print(f"PostgreSQL 연결 실패: {str(e)}")
-            print("SQLite로 폴백합니다...")
-            # PostgreSQL 연결 실패 시 SQLite로 폴백
-            global USE_POSTGRESQL
-            USE_POSTGRESQL = False
-            return sqlite3.connect('exercise_data.db')
-else:
-    def get_db_connection():
-        return sqlite3.connect('exercise_data.db')
+# SQLite 전용 데이터베이스 연결
+def get_db_connection():
+    try:
+        conn = sqlite3.connect('exercise_data.db')
+        # SQLite 최적화 설정
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA temp_store=memory")
+        conn.execute("PRAGMA mmap_size=268435456")  # 256MB
+        return conn
+    except Exception as e:
+        print(f"SQLite 연결 오류: {str(e)}")
+        raise e
 
 # 데이터베이스 초기화
 def init_db():
     try:
-        print(f"데이터베이스 초기화 시작... USE_POSTGRESQL: {USE_POSTGRESQL}")
+        print("=== SQLite 데이터베이스 초기화 시작 ===")
         
-        if USE_POSTGRESQL:
-            print("PostgreSQL 테이블 생성 시도")
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS exercise_records (
-                    id SERIAL PRIMARY KEY,
-                    student_id VARCHAR(20) NOT NULL,
-                    student_name VARCHAR(100) NOT NULL,
-                    exercise_type VARCHAR(100) NOT NULL DEFAULT '언더 핸드 패스',
-                    exercise_date VARCHAR(50) NOT NULL,
-                    count INTEGER NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            conn.commit()
-            print("PostgreSQL 테이블 생성 완료")
-            conn.close()
-        else:
-            print("SQLite 테이블 생성 시도")
-            conn = sqlite3.connect('exercise_data.db')
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS exercise_records (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    student_id TEXT NOT NULL,
-                    student_name TEXT NOT NULL,
-                    exercise_type TEXT NOT NULL,
-                    exercise_date TEXT NOT NULL,
-                    count INTEGER NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            # 기존 테이블에 exercise_type 컬럼이 없다면 추가
+        # 여러 번 시도
+        max_attempts = 3
+        for attempt in range(max_attempts):
             try:
-                cursor.execute("ALTER TABLE exercise_records ADD COLUMN exercise_type TEXT DEFAULT '언더 핸드 패스'")
-                print("exercise_type 컬럼 추가")
-            except sqlite3.OperationalError:
-                # 컬럼이 이미 존재하는 경우
-                print("exercise_type 컬럼 이미 존재")
-                pass
-            
-            conn.commit()
-            print("SQLite 테이블 생성 완료")
-            conn.close()
-        
-        print("데이터베이스 초기화 성공")
+                print(f"테이블 생성 시도 {attempt + 1}/{max_attempts}")
+                
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                
+                # 기존 테이블 확인
+                cursor.execute("""
+                    SELECT name FROM sqlite_master 
+                    WHERE type='table' AND name='exercise_records';
+                """)
+                existing_table = cursor.fetchone()
+                
+                if existing_table:
+                    print("테이블이 이미 존재합니다.")
+                else:
+                    print("새 테이블을 생성합니다...")
+                    
+                    # 테이블 생성
+                    cursor.execute('''
+                        CREATE TABLE exercise_records (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            student_id TEXT NOT NULL,
+                            student_name TEXT NOT NULL,
+                            exercise_type TEXT NOT NULL DEFAULT '언더 핸드 패스',
+                            exercise_date TEXT NOT NULL,
+                            count INTEGER NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    ''')
+                    print("테이블 생성 완료!")
+                
+                # 테이블 구조 확인
+                cursor.execute("PRAGMA table_info(exercise_records)")
+                columns = cursor.fetchall()
+                print(f"테이블 컬럼 정보: {[col[1] for col in columns]}")
+                
+                # 테스트 쿼리
+                cursor.execute("SELECT COUNT(*) FROM exercise_records")
+                count = cursor.fetchone()[0]
+                print(f"현재 레코드 수: {count}")
+                
+                conn.commit()
+                conn.close()
+                
+                print("=== 데이터베이스 초기화 성공! ===")
+                return True
+                
+            except Exception as attempt_error:
+                print(f"시도 {attempt + 1} 실패: {str(attempt_error)}")
+                if attempt == max_attempts - 1:
+                    raise attempt_error
+                continue
         
     except Exception as e:
-        print(f"데이터베이스 초기화 오류: {str(e)}")
+        print(f"=== 데이터베이스 초기화 실패 ===")
+        print(f"오류: {str(e)}")
         print(f"오류 타입: {type(e)}")
         import traceback
         print(f"스택 트레이스: {traceback.format_exc()}")
-        # 초기화 실패 시에도 앱이 시작되도록 함
-        pass
+        
+        # 초기화 실패해도 앱은 시작하되, 경고 출력
+        print("⚠️  앱은 시작되지만 데이터베이스 기능이 작동하지 않을 수 있습니다.")
+        return False
 
 # 정적 파일 서빙 (HTML, CSS, JS)
 @app.route('/')
@@ -118,6 +112,11 @@ def static_files(filename):
 def save_exercise():
     try:
         print("=== 운동 데이터 저장 요청 받음 ===")
+        
+        # 테이블 존재 확인 (안전장치)
+        if not ensure_table_exists():
+            return jsonify({'error': '데이터베이스 테이블을 준비할 수 없습니다'}), 500
+            
         data = request.json
         print(f"받은 데이터: {data}")
         
@@ -139,25 +138,18 @@ def save_exercise():
             return jsonify({'error': '필수 데이터가 누락되었습니다'}), 400
         
         # 데이터베이스에 저장
-        print(f"데이터베이스 연결 시도... USE_POSTGRESQL: {USE_POSTGRESQL}")
+        print(f"데이터베이스 연결 시도...")
         
         try:
             conn = get_db_connection()
             print("데이터베이스 연결 성공")
             cursor = conn.cursor()
             
-            if USE_POSTGRESQL:
-                print("PostgreSQL 모드로 데이터 삽입 시도")
-                cursor.execute('''
-                    INSERT INTO exercise_records (student_id, student_name, exercise_type, exercise_date, count, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                ''', (student_id, student_name, exercise_type, exercise_date, count, exercise_date))
-            else:
-                print("SQLite 모드로 데이터 삽입 시도")
-                cursor.execute('''
-                    INSERT INTO exercise_records (student_id, student_name, exercise_type, exercise_date, count, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (student_id, student_name, exercise_type, exercise_date, count, exercise_date))
+            print("SQLite 모드로 데이터 삽입 시도")
+            cursor.execute('''
+                INSERT INTO exercise_records (student_id, student_name, exercise_type, exercise_date, count, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (student_id, student_name, exercise_type, exercise_date, count, exercise_date))
             
             conn.commit()
             print("데이터베이스 커밋 완료")
@@ -228,6 +220,10 @@ def get_records():
         if not auth_header or not auth_header.startswith('Bearer '):
             return jsonify({'success': False, 'error': '인증이 필요합니다'}), 401
         
+        # 테이블 존재 확인 (안전장치)
+        if not ensure_table_exists():
+            return jsonify({'success': False, 'error': '데이터베이스 테이블을 준비할 수 없습니다'}), 500
+        
         conn = get_db_connection()
         cursor = conn.cursor()
         
@@ -263,16 +259,10 @@ def get_records():
         
         # 오늘 기록 수 조회
         today = datetime.datetime.now().strftime('%Y-%m-%d')
-        if USE_POSTGRESQL:
-            cursor.execute('''
-                SELECT COUNT(*) FROM exercise_records 
-                WHERE DATE(created_at) = %s
-            ''', (today,))
-        else:
-            cursor.execute('''
-                SELECT COUNT(*) FROM exercise_records 
-                WHERE DATE(created_at) = ?
-            ''', (today,))
+        cursor.execute('''
+            SELECT COUNT(*) FROM exercise_records 
+            WHERE DATE(created_at) = ?
+        ''', (today,))
         today_records = cursor.fetchone()[0]
         
         conn.close()
@@ -305,14 +295,15 @@ def delete_record(record_id):
             print("인증 실패: 토큰 없음")
             return jsonify({'success': False, 'error': '인증이 필요합니다'}), 401
         
+        # 테이블 존재 확인 (안전장치)
+        if not ensure_table_exists():
+            return jsonify({'success': False, 'error': '데이터베이스 테이블을 준비할 수 없습니다'}), 500
+        
         conn = get_db_connection()
         cursor = conn.cursor()
         
         # 삭제할 레코드 확인
-        if USE_POSTGRESQL:
-            cursor.execute('SELECT * FROM exercise_records WHERE id = %s', (record_id,))
-        else:
-            cursor.execute('SELECT * FROM exercise_records WHERE id = ?', (record_id,))
+        cursor.execute('SELECT * FROM exercise_records WHERE id = ?', (record_id,))
         
         record = cursor.fetchone()
         if not record:
@@ -323,10 +314,7 @@ def delete_record(record_id):
         print(f"삭제할 레코드 확인: {record}")
         
         # 레코드 삭제
-        if USE_POSTGRESQL:
-            cursor.execute('DELETE FROM exercise_records WHERE id = %s', (record_id,))
-        else:
-            cursor.execute('DELETE FROM exercise_records WHERE id = ?', (record_id,))
+        cursor.execute('DELETE FROM exercise_records WHERE id = ?', (record_id,))
         
         deleted_count = cursor.rowcount
         conn.commit()
@@ -358,6 +346,10 @@ def delete_all_records():
         if confirm_key != 'DELETE_ALL_CONFIRM':
             return jsonify({'success': False, 'error': '확인 키가 올바르지 않습니다'}), 400
         
+        # 테이블 존재 확인 (안전장치)
+        if not ensure_table_exists():
+            return jsonify({'success': False, 'error': '데이터베이스 테이블을 준비할 수 없습니다'}), 500
+        
         conn = get_db_connection()
         cursor = conn.cursor()
         
@@ -384,34 +376,21 @@ def db_status():
     try:
         print("=== 데이터베이스 상태 확인 ===")
         
-        # 환경 변수 확인
-        db_url = os.environ.get('DATABASE_URL', 'None')
-        print(f"DATABASE_URL: {db_url[:50]}..." if db_url != 'None' else "DATABASE_URL: None")
-        print(f"USE_POSTGRESQL: {USE_POSTGRESQL}")
-        
         # 데이터베이스 연결 테스트
         conn = get_db_connection()
         cursor = conn.cursor()
         
         # 테이블 존재 확인
-        if USE_POSTGRESQL:
-            cursor.execute("""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_name = 'exercise_records'
-                );
-            """)
-        else:
-            cursor.execute("""
-                SELECT name FROM sqlite_master 
-                WHERE type='table' AND name='exercise_records';
-            """)
+        cursor.execute("""
+            SELECT name FROM sqlite_master 
+            WHERE type='table' AND name='exercise_records';
+        """)
         
         table_exists = cursor.fetchone()
-        print(f"테이블 존재 여부: {table_exists}")
+        print(f"테이블 존재 여부: {bool(table_exists)}")
         
         # 레코드 수 확인
-        if table_exists and (USE_POSTGRESQL or table_exists[0]):
+        if table_exists:
             cursor.execute("SELECT COUNT(*) FROM exercise_records")
             record_count = cursor.fetchone()[0]
         else:
@@ -421,9 +400,8 @@ def db_status():
         
         return jsonify({
             'success': True,
-            'database_type': 'PostgreSQL' if USE_POSTGRESQL else 'SQLite',
-            'database_url_set': db_url != 'None',
-            'table_exists': bool(table_exists and (USE_POSTGRESQL or table_exists[0])),
+            'database_type': 'SQLite',
+            'table_exists': bool(table_exists),
             'record_count': record_count,
             'status': 'OK'
         })
@@ -433,8 +411,8 @@ def db_status():
         return jsonify({
             'success': False,
             'error': str(e),
-            'database_type': 'PostgreSQL' if USE_POSTGRESQL else 'SQLite',
-            'database_url_set': os.environ.get('DATABASE_URL') is not None
+            'database_type': 'SQLite',
+            'table_exists': False
         }), 500
 
 # 데이터베이스 강제 초기화 API (테스트용)
@@ -454,12 +432,88 @@ def force_init_db():
             'error': str(e)
         }), 500
 
+# 테이블 존재 여부 확인 함수
+def ensure_table_exists():
+    """테이블이 존재하는지 확인하고, 없으면 생성"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='exercise_records'")
+        table_exists = cursor.fetchone()
+        conn.close()
+        
+        if not table_exists:
+            print("⚠️  테이블이 없습니다. 자동 생성을 시도합니다...")
+            return init_db()
+        return True
+    except Exception as e:
+        print(f"테이블 확인 오류: {str(e)}")
+        return False
+
 if __name__ == '__main__':
-    init_db()  # 데이터베이스 초기화
-    print("데이터베이스가 초기화되었습니다.")
+    print("🚀 운동 기록 관리 시스템 시작!")
+    print("=" * 50)
     
-    # 배포 환경에서는 환경 변수에서 포트를 가져옴
+    # 데이터베이스 초기화 (반드시 성공해야 함)
+    print("\n📊 데이터베이스 초기화 중...")
+    
+    db_initialized = False
+    max_attempts = 10  # 최대 10번 시도
+    
+    for attempt in range(max_attempts):
+        print(f"시도 {attempt + 1}/{max_attempts}")
+        
+        try:
+            if init_db():
+                # 초기화 후 테이블 존재 확인
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='exercise_records'")
+                table_check = cursor.fetchone()
+                
+                if table_check:
+                    cursor.execute("SELECT COUNT(*) FROM exercise_records")
+                    record_count = cursor.fetchone()[0]
+                    conn.close()
+                    
+                    print(f"✅ 데이터베이스 초기화 성공!")
+                    print(f"✅ 테이블 확인: exercise_records 존재")
+                    print(f"✅ 현재 레코드 수: {record_count}")
+                    db_initialized = True
+                    break
+                else:
+                    conn.close()
+                    print(f"❌ 테이블이 생성되지 않음 (시도 {attempt + 1})")
+            else:
+                print(f"❌ 데이터베이스 초기화 실패 (시도 {attempt + 1})")
+                
+        except Exception as e:
+            print(f"❌ 초기화 중 오류: {str(e)} (시도 {attempt + 1})")
+        
+        if attempt < max_attempts - 1:
+            import time
+            print("⏳ 3초 후 재시도...")
+            time.sleep(3)
+    
+    # 데이터베이스 초기화 실패 시 앱 시작 중단
+    if not db_initialized:
+        print("\n" + "=" * 50)
+        print("❌ 치명적 오류: 데이터베이스 초기화 실패")
+        print("❌ 앱을 시작할 수 없습니다.")
+        print("=" * 50)
+        exit(1)  # 앱 종료
+    
+    print("\n🌐 웹 서버 시작 중...")
+    
+    # 환경 변수에서 포트를 가져옴
     port = int(os.environ.get('PORT', 8000))
     debug_mode = os.environ.get('DEBUG', 'False').lower() == 'true'
+    
+    print(f"🔧 포트: {port}")
+    print(f"🔧 디버그 모드: {debug_mode}")
+    print(f"🔧 데이터베이스: SQLite (exercise_data.db)")
+    print("=" * 50)
+    print("✨ 준비 완료! 데이터베이스가 완전히 준비되었습니다.")
+    print("✨ 브라우저에서 접속하세요.")
     
     app.run(debug=debug_mode, host='0.0.0.0', port=port) 
