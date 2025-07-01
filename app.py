@@ -19,63 +19,90 @@ if USE_POSTGRESQL:
     import psycopg2.extras
     
     def get_db_connection():
-        # Heroku/Railway PostgreSQL URL 파싱
-        if DATABASE_URL.startswith('postgres://'):
-            DATABASE_URL_FIXED = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
-        else:
-            DATABASE_URL_FIXED = DATABASE_URL
-            
-        conn = psycopg2.connect(DATABASE_URL_FIXED)
-        return conn
+        try:
+            # Heroku/Railway PostgreSQL URL 파싱
+            if DATABASE_URL.startswith('postgres://'):
+                DATABASE_URL_FIXED = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+            else:
+                DATABASE_URL_FIXED = DATABASE_URL
+                
+            conn = psycopg2.connect(DATABASE_URL_FIXED)
+            return conn
+        except Exception as e:
+            print(f"PostgreSQL 연결 실패: {str(e)}")
+            print("SQLite로 폴백합니다...")
+            # PostgreSQL 연결 실패 시 SQLite로 폴백
+            global USE_POSTGRESQL
+            USE_POSTGRESQL = False
+            return sqlite3.connect('exercise_data.db')
 else:
     def get_db_connection():
         return sqlite3.connect('exercise_data.db')
 
 # 데이터베이스 초기화
 def init_db():
-    if USE_POSTGRESQL:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS exercise_records (
-                id SERIAL PRIMARY KEY,
-                student_id VARCHAR(20) NOT NULL,
-                student_name VARCHAR(100) NOT NULL,
-                exercise_type VARCHAR(100) NOT NULL DEFAULT '언더 핸드 패스',
-                exercise_date VARCHAR(50) NOT NULL,
-                count INTEGER NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        conn.commit()
-        conn.close()
-    else:
-        conn = sqlite3.connect('exercise_data.db')
-        cursor = conn.cursor()
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS exercise_records (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            student_id TEXT NOT NULL,
-            student_name TEXT NOT NULL,
-            exercise_type TEXT NOT NULL,
-            exercise_date TEXT NOT NULL,
-            count INTEGER NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # 기존 테이블에 exercise_type 컬럼이 없다면 추가
     try:
-        cursor.execute("ALTER TABLE exercise_records ADD COLUMN exercise_type TEXT DEFAULT '언더 핸드 패스'")
-    except sqlite3.OperationalError:
-        # 컬럼이 이미 존재하는 경우
+        print(f"데이터베이스 초기화 시작... USE_POSTGRESQL: {USE_POSTGRESQL}")
+        
+        if USE_POSTGRESQL:
+            print("PostgreSQL 테이블 생성 시도")
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS exercise_records (
+                    id SERIAL PRIMARY KEY,
+                    student_id VARCHAR(20) NOT NULL,
+                    student_name VARCHAR(100) NOT NULL,
+                    exercise_type VARCHAR(100) NOT NULL DEFAULT '언더 핸드 패스',
+                    exercise_date VARCHAR(50) NOT NULL,
+                    count INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            conn.commit()
+            print("PostgreSQL 테이블 생성 완료")
+            conn.close()
+        else:
+            print("SQLite 테이블 생성 시도")
+            conn = sqlite3.connect('exercise_data.db')
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS exercise_records (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    student_id TEXT NOT NULL,
+                    student_name TEXT NOT NULL,
+                    exercise_type TEXT NOT NULL,
+                    exercise_date TEXT NOT NULL,
+                    count INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # 기존 테이블에 exercise_type 컬럼이 없다면 추가
+            try:
+                cursor.execute("ALTER TABLE exercise_records ADD COLUMN exercise_type TEXT DEFAULT '언더 핸드 패스'")
+                print("exercise_type 컬럼 추가")
+            except sqlite3.OperationalError:
+                # 컬럼이 이미 존재하는 경우
+                print("exercise_type 컬럼 이미 존재")
+                pass
+            
+            conn.commit()
+            print("SQLite 테이블 생성 완료")
+            conn.close()
+        
+        print("데이터베이스 초기화 성공")
+        
+    except Exception as e:
+        print(f"데이터베이스 초기화 오류: {str(e)}")
+        print(f"오류 타입: {type(e)}")
+        import traceback
+        print(f"스택 트레이스: {traceback.format_exc()}")
+        # 초기화 실패 시에도 앱이 시작되도록 함
         pass
-    
-    conn.commit()
-    conn.close()
 
 # 정적 파일 서빙 (HTML, CSS, JS)
 @app.route('/')
@@ -111,39 +138,58 @@ def save_exercise():
             print("데이터 검증 실패: 필수 데이터 누락")
             return jsonify({'error': '필수 데이터가 누락되었습니다'}), 400
         
-        # 데이터베이스에 저장 (created_at은 데이터베이스 기본값 사용)
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        # 데이터베이스에 저장
+        print(f"데이터베이스 연결 시도... USE_POSTGRESQL: {USE_POSTGRESQL}")
         
-        if USE_POSTGRESQL:
-            cursor.execute('''
-                INSERT INTO exercise_records (student_id, student_name, exercise_type, exercise_date, count, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            ''', (student_id, student_name, exercise_type, exercise_date, count, exercise_date))
-        else:
-            cursor.execute('''
-                INSERT INTO exercise_records (student_id, student_name, exercise_type, exercise_date, count, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (student_id, student_name, exercise_type, exercise_date, count, exercise_date))
-        
-        conn.commit()
-        conn.close()
-        
-        print(f"데이터베이스 저장 성공: {student_id}, {student_name}, {exercise_type}, {count}회")
-        
-        return jsonify({
-            'success': True,
-            'message': '데이터가 성공적으로 저장되었습니다',
-            'data': {
-                'student_id': student_id,
-                'student_name': student_name,
-                'exercise_type': exercise_type,
-                'exercise_date': exercise_date,
-                'count': count
-            }
-        })
+        try:
+            conn = get_db_connection()
+            print("데이터베이스 연결 성공")
+            cursor = conn.cursor()
+            
+            if USE_POSTGRESQL:
+                print("PostgreSQL 모드로 데이터 삽입 시도")
+                cursor.execute('''
+                    INSERT INTO exercise_records (student_id, student_name, exercise_type, exercise_date, count, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                ''', (student_id, student_name, exercise_type, exercise_date, count, exercise_date))
+            else:
+                print("SQLite 모드로 데이터 삽입 시도")
+                cursor.execute('''
+                    INSERT INTO exercise_records (student_id, student_name, exercise_type, exercise_date, count, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (student_id, student_name, exercise_type, exercise_date, count, exercise_date))
+            
+            conn.commit()
+            print("데이터베이스 커밋 완료")
+            conn.close()
+            print("데이터베이스 연결 종료")
+            
+            print(f"데이터베이스 저장 성공: {student_id}, {student_name}, {exercise_type}, {count}회")
+            
+            return jsonify({
+                'success': True,
+                'message': '데이터가 성공적으로 저장되었습니다',
+                'data': {
+                    'student_id': student_id,
+                    'student_name': student_name,
+                    'exercise_type': exercise_type,
+                    'exercise_date': exercise_date,
+                    'count': count
+                }
+            })
+            
+        except Exception as db_error:
+            print(f"데이터베이스 오류: {str(db_error)}")
+            print(f"오류 타입: {type(db_error)}")
+            import traceback
+            print(f"스택 트레이스: {traceback.format_exc()}")
+            return jsonify({'error': f'데이터베이스 오류: {str(db_error)}'}), 500
         
     except Exception as e:
+        print(f"전체 오류: {str(e)}")
+        print(f"오류 타입: {type(e)}")
+        import traceback
+        print(f"스택 트레이스: {traceback.format_exc()}")
         return jsonify({'error': f'서버 오류: {str(e)}'}), 500
 
 # 관리자 로그인 API
