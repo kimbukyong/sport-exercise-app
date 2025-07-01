@@ -378,6 +378,82 @@ def delete_all_records():
     except Exception as e:
         return jsonify({'error': f'서버 오류: {str(e)}'}), 500
 
+# 데이터베이스 상태 확인 API (테스트용)
+@app.route('/api/db-status', methods=['GET'])
+def db_status():
+    try:
+        print("=== 데이터베이스 상태 확인 ===")
+        
+        # 환경 변수 확인
+        db_url = os.environ.get('DATABASE_URL', 'None')
+        print(f"DATABASE_URL: {db_url[:50]}..." if db_url != 'None' else "DATABASE_URL: None")
+        print(f"USE_POSTGRESQL: {USE_POSTGRESQL}")
+        
+        # 데이터베이스 연결 테스트
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 테이블 존재 확인
+        if USE_POSTGRESQL:
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'exercise_records'
+                );
+            """)
+        else:
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='exercise_records';
+            """)
+        
+        table_exists = cursor.fetchone()
+        print(f"테이블 존재 여부: {table_exists}")
+        
+        # 레코드 수 확인
+        if table_exists and (USE_POSTGRESQL or table_exists[0]):
+            cursor.execute("SELECT COUNT(*) FROM exercise_records")
+            record_count = cursor.fetchone()[0]
+        else:
+            record_count = 0
+            
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'database_type': 'PostgreSQL' if USE_POSTGRESQL else 'SQLite',
+            'database_url_set': db_url != 'None',
+            'table_exists': bool(table_exists and (USE_POSTGRESQL or table_exists[0])),
+            'record_count': record_count,
+            'status': 'OK'
+        })
+        
+    except Exception as e:
+        print(f"데이터베이스 상태 확인 오류: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'database_type': 'PostgreSQL' if USE_POSTGRESQL else 'SQLite',
+            'database_url_set': os.environ.get('DATABASE_URL') is not None
+        }), 500
+
+# 데이터베이스 강제 초기화 API (테스트용)
+@app.route('/api/init-db', methods=['POST'])
+def force_init_db():
+    try:
+        print("=== 데이터베이스 강제 초기화 ===")
+        init_db()
+        return jsonify({
+            'success': True,
+            'message': '데이터베이스가 초기화되었습니다'
+        })
+    except Exception as e:
+        print(f"데이터베이스 강제 초기화 오류: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 if __name__ == '__main__':
     init_db()  # 데이터베이스 초기화
     print("데이터베이스가 초기화되었습니다.")
