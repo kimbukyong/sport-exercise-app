@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>운동 자세 교정 시스템 - 사용자 등록</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .registration-container {
+            background: white;
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+        
+        .logo {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            color: #667eea;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 1.8em;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 0.9em;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+        }
+        
+        input[type="text"] {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e1e5e9;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+        }
+        
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .start-button {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        
+        .start-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        .start-button:active {
+            transform: translateY(0);
+        }
+        
+        .start-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .error-message {
+            color: #e74c3c;
+            font-size: 0.9em;
+            margin-top: 5px;
+            display: none;
+        }
+        
+        .info-box {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 5px;
+            text-align: left;
+        }
+        
+        .info-box h3 {
+            color: #667eea;
+            margin-bottom: 8px;
+            font-size: 1em;
+        }
+        
+        .info-box ul {
+            color: #666;
+            font-size: 0.9em;
+            padding-left: 20px;
+        }
+        
+        .info-box li {
+            margin-bottom: 5px;
+        }
+        
+        .admin-link {
+            margin-top: 20px;
+            text-align: center;
+        }
+        
+        .admin-link a {
+            color: #2c3e50;
+            text-decoration: none;
+            font-size: 1em;
+            font-weight: 600;
+            padding: 12px 20px;
+            border: 2px solid #2c3e50;
+            border-radius: 25px;
+            transition: all 0.3s ease;
+            display: inline-block;
+            background: rgba(44, 62, 80, 0.1);
+        }
+        
+        .admin-link a:hover {
+            color: white;
+            background: #2c3e50;
+            box-shadow: 0 4px 8px rgba(44, 62, 80, 0.3);
+            transform: translateY(-2px);
+        }
+    </style>
+</head>
+<body>
+    <div class="registration-container">
+        <div class="logo">🏃‍♂️</div>
+        <h1>운동 자세 교정 시스템</h1>
+        <p class="subtitle">언더 핸드 패스 자세 분석</p>
+        
+        <form id="registrationForm">
+            <div class="form-group">
+                <label for="studentId">학번</label>
+                <input type="text" id="studentId" name="studentId" placeholder="예: 2024001234" required>
+                <div class="error-message" id="studentIdError">올바른 학번을 입력해주세요</div>
+            </div>
+            
+            <div class="form-group">
+                <label for="studentName">이름</label>
+                <input type="text" id="studentName" name="studentName" placeholder="홍길동" required>
+                <div class="error-message" id="studentNameError">이름을 입력해주세요</div>
+            </div>
+            
+            <button type="submit" class="start-button" id="startButton">
+                운동 시작하기
+            </button>
+        </form>
+        
+        <div class="info-box">
+            <h3>📋 사용 전 확인사항</h3>
+            <ul>
+                <li>웹캠이 연결되어 있는지 확인</li>
+                <li>충분한 조명이 있는 공간에서 사용</li>
+                <li>전신이 카메라에 보이도록 위치 조정</li>
+                <li>Chrome 브라우저 권장</li>
+            </ul>
+        </div>
+        
+        <div class="admin-link">
+            <a href="/admin.html">🔐 관리자 로그인</a>
+        </div>
+    </div>
+
+    <script src="login.js"></script>
+</body>
+</html> 
